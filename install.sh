@@ -12,14 +12,14 @@ SERVER_DIR="$HOME/VolterServer"
 PLUGINS_DIR="$SERVER_DIR/plugins"
 
 MC_VERSION="1.20.4"
-PAPER_BUILD="499"
-PAPER_JAR="paper-${MC_VERSION}-${PAPER_BUILD}.jar"
 
-# Versions selected for this 1.20.4 setup
+# VolterScripts identity for PaperMC Downloads Service
+USER_AGENT="VolterScripts/1.0 (https://github.com/VolterBolt/VolterScripts)"
+
+# Plugin versions selected for this setup
 ESSENTIALS_VERSION="2.20.1"
 VAULT_VERSION="1.7.3"
 
-# Stable ViaVersion family known to support Paper 1.20.4
 VIA_VERSION="5.12.0"
 VIA_BACKWARDS_VERSION="5.12.0"
 
@@ -29,7 +29,6 @@ echo "          VOLTER SERVER INSTALLER"
 echo "=================================================="
 echo
 echo "Minecraft : Paper ${MC_VERSION}"
-echo "Paper     : Build ${PAPER_BUILD}"
 echo "Location  : ${SERVER_DIR}"
 echo
 
@@ -55,15 +54,27 @@ if ! command -v wget >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! command -v jq >/dev/null 2>&1; then
+    echo
+    echo "ERROR: jq is not installed."
+    echo "Install it with:"
+    echo
+    echo "pkg install jq"
+    exit 1
+fi
+
 echo "Java detected:"
 java -version 2>&1 | head -n 1
 
 echo
+echo "wget detected."
+echo "jq detected."
 
 # ============================================================
 # CREATE SERVER
 # ============================================================
 
+echo
 echo "[2/7] Creating server directory..."
 
 mkdir -p "$SERVER_DIR"
@@ -75,51 +86,83 @@ cd "$SERVER_DIR"
 # PAPER
 # ============================================================
 
+echo
 echo "[3/7] Installing Paper ${MC_VERSION}..."
 
-echo "Finding latest stable Paper build..."
+echo "Checking PaperMC Downloads Service..."
 
-PAPER_JSON=$(wget -qO- \
-    --header="User-Agent: VolterScripts/1.0 (https://github.com/VolterBolt/VolterScripts)" \
-    "https://fill.papermc.io/v3/projects/paper/${MC_VERSION}/builds")
+BUILDS_URL="https://fill.papermc.io/v3/projects/paper/versions/${MC_VERSION}/builds"
 
-PAPER_BUILD=$(echo "$PAPER_JSON" | jq -r '
-    map(select(.channel == "STABLE")) |
-    .[0].id
-')
+BUILDS_RESPONSE=$(wget -qO- \
+    --header="User-Agent: ${USER_AGENT}" \
+    "$BUILDS_URL") || {
+        echo
+        echo "ERROR: Could not contact PaperMC Downloads Service."
+        echo "URL:"
+        echo "$BUILDS_URL"
+        exit 1
+    }
 
-PAPER_JAR=$(echo "$PAPER_JSON" | jq -r '
-    map(select(.channel == "STABLE")) |
-    .[0].downloads."server:default".name
-')
+# Check whether PaperMC returned an API error object.
+if echo "$BUILDS_RESPONSE" | jq -e '.ok == false' >/dev/null 2>&1; then
+    ERROR_MSG=$(echo "$BUILDS_RESPONSE" | jq -r '.message // "Unknown PaperMC API error"')
 
-DOWNLOAD_URL=$(echo "$PAPER_JSON" | jq -r '
-    map(select(.channel == "STABLE")) |
-    .[0].downloads."server:default".url
-')
-
-if [ -z "$PAPER_BUILD" ] || [ "$PAPER_BUILD" = "null" ]; then
-    echo "ERROR: Could not find a stable Paper build for ${MC_VERSION}."
+    echo
+    echo "ERROR: PaperMC Downloads Service returned an error."
+    echo "Message: $ERROR_MSG"
     exit 1
 fi
 
-if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-    echo "ERROR: Could not find Paper download URL."
+# Get latest stable Paper build.
+PAPER_BUILD=$(echo "$BUILDS_RESPONSE" | jq -r '
+    first(.[] | select(.channel == "STABLE") | .id) // "null"
+')
+
+# Get the official Paper JAR filename.
+PAPER_JAR=$(echo "$BUILDS_RESPONSE" | jq -r '
+    first(.[] | select(.channel == "STABLE") | .downloads."server:default".name) // "null"
+')
+
+# Get the official Paper download URL.
+DOWNLOAD_URL=$(echo "$BUILDS_RESPONSE" | jq -r '
+    first(.[] | select(.channel == "STABLE") | .downloads."server:default".url) // "null"
+')
+
+if [ "$PAPER_BUILD" = "null" ] || [ -z "$PAPER_BUILD" ]; then
+    echo
+    echo "ERROR: No stable Paper build found for Minecraft ${MC_VERSION}."
     exit 1
 fi
 
-echo "Paper build found: ${PAPER_BUILD}"
-echo "Paper JAR: ${PAPER_JAR}"
+if [ "$PAPER_JAR" = "null" ] || [ -z "$PAPER_JAR" ]; then
+    echo
+    echo "ERROR: Paper JAR filename was not provided by the API."
+    exit 1
+fi
+
+if [ "$DOWNLOAD_URL" = "null" ] || [ -z "$DOWNLOAD_URL" ]; then
+    echo
+    echo "ERROR: Paper download URL was not provided by the API."
+    exit 1
+fi
+
+echo
+echo "Paper build found : ${PAPER_BUILD}"
+echo "Paper JAR         : ${PAPER_JAR}"
 
 if [ -f "$PAPER_JAR" ]; then
     echo "Paper already exists."
 else
+    echo
     echo "Downloading Paper ${PAPER_BUILD}..."
 
     wget --show-progress \
-        --header="User-Agent: VolterScripts/1.0 (https://github.com/VolterBolt/VolterScripts)" \
+        --header="User-Agent: ${USER_AGENT}" \
         -O "$PAPER_JAR" \
         "$DOWNLOAD_URL"
+
+    echo
+    echo "Paper download complete."
 fi
 
 # ============================================================
@@ -135,6 +178,8 @@ cat > "$SERVER_DIR/eula.txt" <<EOF
 
 eula=true
 EOF
+
+echo "EULA accepted."
 
 # ============================================================
 # DOWNLOAD FUNCTION
@@ -208,22 +253,22 @@ download_plugin \
     "ViaBackwards.jar"
 
 # ============================================================
-# OPTIONAL VIA REWIND
+# OPTIONAL LEGACY SUPPORT
 # ============================================================
 
 echo
 echo "ViaRewind:"
 echo
-echo "ViaRewind is an optional addon for very old"
-echo "1.8.x / 1.7.x clients."
+echo "ViaRewind is optional and is intended for"
+echo "very old Minecraft clients such as 1.8.x / 1.7.x."
 echo
-echo "It is intentionally not auto-downloaded here."
-echo "Install it separately if legacy-client support"
-echo "is actually required."
+echo "It is NOT automatically installed because"
+echo "this installer does not want to depend on an"
+echo "unverified hardcoded release URL."
 echo
 
 # ============================================================
-# GEYSER WARNING
+# GEYSER
 # ============================================================
 
 echo
@@ -231,16 +276,13 @@ echo "=================================================="
 echo "GEYSER NOTICE"
 echo "=================================================="
 echo
-echo "This server is Paper ${MC_VERSION}."
+echo "Minecraft Java server : Paper ${MC_VERSION}"
 echo
-echo "Current Geyser-Spigot does NOT support direct"
-echo "installation on Java servers below 1.20.5."
+echo "Geyser-Spigot is not being installed automatically"
+echo "for this 1.20.4 setup."
 echo
-echo "For Bedrock crossplay on 1.20.4 use:"
-echo
-echo "  Geyser-ViaProxy / Geyser Standalone"
-echo
-echo "rather than pretending Geyser-Spigot is installed."
+echo "For Bedrock crossplay, use a compatible"
+echo "Geyser standalone / proxy-based setup instead."
 echo
 echo "=================================================="
 
@@ -262,7 +304,7 @@ EOF
 chmod +x "$SERVER_DIR/start.sh"
 
 # ============================================================
-# SUMMARY
+# INSTALLATION SUMMARY
 # ============================================================
 
 echo
@@ -274,8 +316,14 @@ echo
 echo "Server:"
 echo "  $SERVER_DIR"
 echo
-echo "Paper:"
-echo "  $PAPER_JAR"
+echo "Minecraft:"
+echo "  Paper ${MC_VERSION}"
+echo
+echo "Paper build:"
+echo "  ${PAPER_BUILD}"
+echo
+echo "Paper JAR:"
+echo "  ${PAPER_JAR}"
 echo
 echo "Installed plugins:"
 echo
@@ -283,6 +331,9 @@ echo
 find "$PLUGINS_DIR" -maxdepth 1 -type f -name "*.jar" \
     -printf "  %f\n" 2>/dev/null || ls -1 "$PLUGINS_DIR"/*.jar
 
+echo
+echo "EULA:"
+echo "  Accepted"
 echo
 echo "Start server:"
 echo
