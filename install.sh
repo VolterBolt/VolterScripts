@@ -77,13 +77,49 @@ cd "$SERVER_DIR"
 
 echo "[3/7] Installing Paper ${MC_VERSION}..."
 
-PAPER_URL="https://api.papermc.io/v2/projects/paper/versions/${MC_VERSION}/builds/${PAPER_BUILD}/downloads/${PAPER_JAR}"
+echo "Finding latest stable Paper build..."
+
+PAPER_JSON=$(wget -qO- \
+    --header="User-Agent: VolterScripts/1.0 (https://github.com/VolterBolt/VolterScripts)" \
+    "https://fill.papermc.io/v3/projects/paper/${MC_VERSION}/builds")
+
+PAPER_BUILD=$(echo "$PAPER_JSON" | jq -r '
+    map(select(.channel == "STABLE")) |
+    .[0].id
+')
+
+PAPER_JAR=$(echo "$PAPER_JSON" | jq -r '
+    map(select(.channel == "STABLE")) |
+    .[0].downloads."server:default".name
+')
+
+DOWNLOAD_URL=$(echo "$PAPER_JSON" | jq -r '
+    map(select(.channel == "STABLE")) |
+    .[0].downloads."server:default".url
+')
+
+if [ -z "$PAPER_BUILD" ] || [ "$PAPER_BUILD" = "null" ]; then
+    echo "ERROR: Could not find a stable Paper build for ${MC_VERSION}."
+    exit 1
+fi
+
+if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+    echo "ERROR: Could not find Paper download URL."
+    exit 1
+fi
+
+echo "Paper build found: ${PAPER_BUILD}"
+echo "Paper JAR: ${PAPER_JAR}"
 
 if [ -f "$PAPER_JAR" ]; then
     echo "Paper already exists."
 else
-    echo "Downloading Paper..."
-    wget --show-progress -O "$PAPER_JAR" "$PAPER_URL"
+    echo "Downloading Paper ${PAPER_BUILD}..."
+
+    wget --show-progress \
+        --header="User-Agent: VolterScripts/1.0 (https://github.com/VolterBolt/VolterScripts)" \
+        -O "$PAPER_JAR" \
+        "$DOWNLOAD_URL"
 fi
 
 # ============================================================
