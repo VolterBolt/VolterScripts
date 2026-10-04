@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -294,7 +294,7 @@ echo
 echo "[7/7] Creating start script..."
 
 cat > "$SERVER_DIR/start.sh" <<EOF
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 
 cd "\$(dirname "\$0")"
 
